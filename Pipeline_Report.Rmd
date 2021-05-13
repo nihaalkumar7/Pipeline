@@ -1,0 +1,929 @@
+---
+title: "Pipeline_Report"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(salesforcer)
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+library(sqldf)
+library(tidyverse)
+library(DT)
+library(readr)
+library(forestmangr)
+library(writexl)
+library(readxl)
+library(readr)
+library(arsenal)
+```
+
+
+
+```{r}
+Opp <- sf_query_bulk("SELECT Id, 
+                      CloseDate,
+                      AccountId,
+                      OwnerId,
+                      Reseller__c,
+                      CreatedDate,
+                      Name,
+                      Distributor__c,
+                      LeadSource,
+                      StageName,
+                      Business_Group__c,
+                      Amount,
+                      RecordTypeId,
+                      Migration__c,
+                      Deal_Reg_Type__c
+                     FROM Opportunity")
+```
+
+
+
+```{r}
+Account <- sf_query_bulk("SELECT Id,
+                                Name,
+                                Type,
+                                Employees_Formula__c,
+                                OwnerId,
+                                Partner_Level__c,
+                                Focus_Partner__c,
+                                Nationwide_Partner_for_Channel_Comms__c,
+                                Territory_ID__c,
+                                House_Account__c
+                                 FROM Account")
+```
+
+```{r}
+Quotes <- sf_query_bulk("SELECT Id, 
+                        SBQQ__Opportunity2__c, 
+                        SBQQ__Primary__c,
+                        Created_Date__c,
+                        SBQQ__SubscriptionTerm__c
+                        FROM SBQQ__Quote__c")
+```
+
+
+```{r}
+Record_Type <- sf_query_bulk("SELECT Id, 
+                                    Name 
+                             FROM RecordType")
+```
+
+```{r}
+Terr <- sf_query_bulk("SELECT Id, 
+                      Name, 
+                      Sub_Territory2__c, 
+                      Territory2__c, 
+                      Region2__c, 
+                      Sub_Theater2__c, 
+                      Theater2__c 
+                      FROM Territory2")
+```
+
+```{r}
+Product <- sf_query_bulk("SELECT Id,
+                          ProductCode,
+                          Name,
+                          Family,
+                          SBCF_Product_Family_Code__c,
+                          SBCF_Form_Factor__c,
+                          prod_subtype__c,
+                          Base_SKU__c 
+                          FROM Product2")
+```
+
+#new object to bring in
+```{r}
+User <- sf_query_bulk("SELECT Id,Name FROM User")
+```
+
+#also bring in subscription(in Bookings R code from earlier)
+
+```{r}
+Subscription <- sf_query_bulk("SELECT Id, 
+                               SBQQ__Product__c,
+                               SBQQ__Quantity__c, 
+                               SBCF_Serial_Number__c, 
+                               Renewed_By_Subscription__c,
+                               SBQQ__StartDate__c, 
+                               SBQQ__EndDate__c,
+                               SBQQ__Account__c FROM SBQQ__Subscription__c")
+```
+
+```{r}
+QuoteLineGroup <- sf_query_bulk("SELECT Id, SBQQ__Number__c, SBQQ__Optional__c, SBQQ__Quote__c,Name FROM SBQQ__QuoteLineGroup__c")
+```
+
+
+```{r}
+Currency <- read.csv("Currency.csv")
+Prod_Category <- read.csv("Product Category Mapping.csv")
+Pseudo_Prod_Category <- read.csv("Pseudo Product Family Mapping.csv")
+```
+
+#QUERY FOR QUOTELINE OBJECT:
+SELECT CurrencyIsoCode, Extended_Price__c,Id,SBQQ__NetTotal__c,SBQQ__Quote__c,SBQQ__PartnerDiscount__c,SBQQ__PartnerTotal__c,
+SBQQ__Product__c,SBQQ__Group__c FROM SBQQ__QuoteLine__c
+
+```{r}
+QuoteLine <- read.csv("SBQQ__QuoteLine__c.csv")
+```
+
+
+
+
+#Rename Fields for consistency
+```{r}
+Product01 <- Product %>% rename(Product2Id = Id,Product_Name = Name)
+
+
+Opp01 <- Opp %>% rename(Opportunity_Id = Id, Opportunity_OwnerId = OwnerId,Opportunity_Name = Name)
+
+Quotes01 <- Quotes %>% rename(Quote_Id = Id, Opportunity_Id = SBQQ__Opportunity2__c, Quote_CreatedDate = Created_Date__c)
+
+Terr01 <- Terr %>% rename(Sub_Territory__c = Sub_Territory2__c, Territory__c = Territory2__c, Region__c = Region2__c, Sub_Theater__c = Sub_Theater2__c, Theater__c = Theater2__c,Territory_Name = Name)
+
+User01 <- User %>% rename(User_Id = Id, Rep_Name = Name)
+
+
+Subscription01 <- Subscription %>% rename(SubStartDate = SBQQ__StartDate__c, SubEndDate = SBQQ__EndDate__c,Subscription_Id = Id)
+
+QuoteLine01 <- QuoteLine %>% rename(QuoteLine_Id = Id)
+
+QuoteLineGroup01 <- QuoteLineGroup %>% rename(Group_Name = Name)
+
+Record_Type01 <- Record_Type %>% rename(RecordTypeId = Id, 
+                                        Record_Name = Name)
+```
+ 
+ 
+
+
+ 
+ 
+#Product Category Mapping
+```{r}
+Prod_Category01 <- Prod_Category %>% select(Id,Sub.Product) %>% distinct()
+```
+#map product categories with product object
+```{r}
+Product02 <- merge(Product01, Prod_Category01, by.x = "Product2Id",by.y = "Id",all.x = TRUE)
+```
+
+#Add in Pseudo Product Family Mapping
+```{r}
+Product03 <- merge(Product02,Pseudo_Prod_Category, by = "Sub.Product", all.x = TRUE)
+```
+
+
+
+#Create Opportunity Dates
+```{r}
+Opp01$Month <- month(Opp01$CloseDate)
+Opp01$Year <- year(Opp01$CloseDate)
+Opp01$FiscalMonth <- ifelse(Opp01$Month < 3, Opp01$Month + 10, Opp01$Month - 2)
+Opp01$FiscalYear <- ifelse(Opp01$Month < 3, Opp01$Year, Opp01$Year + 1)
+Opp01$FiscalHalf <- paste(as.character(Opp01$FiscalYear), as.character(ifelse(Opp01$FiscalMonth < 7, 1, 2)), sep = "")
+Opp01$Quarter <- ifelse(Opp01$Month <= 2, 4, ifelse(Opp01$Month <= 5, 1, ifelse(Opp01$Month <= 8, 2, ifelse(Opp01$Month <= 11, 3, ifelse(Opp01$Month == 12, 4, "Error")))))
+Opp01$Semester <- ifelse(Opp01$FiscalMonth < 7, 1, 2)
+Opp01$Month <- ifelse(str_length(Opp01$Month) == 1, paste("0", Opp01$Month, sep = ""), Opp01$Month)
+Opp01$QuotaPeriod <- paste(Opp01$Year, Opp01$Month, sep = "")
+```
+
+#filter Oppty
+```{r}
+Opp02 <- Opp01 %>% filter(StageName != "Closed Lost" & StageName != "Closed Won")
+Opp02 <- Opp02 %>% filter(CloseDate >= today()-30)
+```
+
+
+```{r}
+Opp02$CreatedDate <- as.Date(Opp02$CreatedDate)
+```
+
+
+```{r}
+Quotes01 <- Quotes01 %>% mutate(value = 1, QuoteCount = ave(value,Opportunity_Id, FUN = sum)) %>% mutate(grouping = paste(Opportunity_Id,SBQQ__Primary__c), Primary_Count = ave(value, grouping, FUN = sum)) 
+```
+
+
+```{r}
+Quotes01 <- Quotes01 %>% arrange(Opportunity_Id,desc(SBQQ__Primary__c),Quote_CreatedDate) %>% mutate(Choice = ave(value,Opportunity_Id,FUN = cumsum))
+```
+
+
+```{r}
+Quotes01 <- Quotes01 %>% select(Opportunity_Id,Quote_Id,SBQQ__Primary__c,Quote_CreatedDate,SBQQ__SubscriptionTerm__c,value,QuoteCount,grouping,Primary_Count,Choice)
+```
+
+
+
+```{r}
+Quotes02 <- Quotes01 %>% filter(Choice == 1) %>% select(Opportunity_Id,Quote_Id,SBQQ__Primary__c,Quote_CreatedDate,SBQQ__SubscriptionTerm__c)
+```
+
+
+```{r}
+Quotes02 %>% group_by(Quote_Id)
+```
+
+#Join Quote with Opps
+```{r}
+Main <- merge(Opp02, Quotes02, by = "Opportunity_Id", all.x = TRUE)
+```
+
+
+#Discounting
+
+#Pull in Extended_Price__c field on Quoteline object -> extended price = post auto discount list price
+#List price --> Extended price --> Partner Price/Street Price --> Bookings(SBQQ_Net_Total)
+
+#Discount = discount between extended price and the partner/street price
+
+
+
+```{r}
+
+QuoteLine01 <- QuoteLine01 %>% 
+  mutate(Partner_Total = round((SBQQ__NetTotal__c/ (100 - ifelse(is.na(SBQQ__PartnerDiscount__c) == T,0, SBQQ__PartnerDiscount__c)))*100,2)) %>%
+  mutate(Discount = ifelse(Extended_Price__c == 0 &  Partner_Total > 0,
+                           100,
+                           ifelse(SBQQ__NetTotal__c == 0 | Partner_Total == 0 | SBQQ__NetTotal__c < 0,
+                                  0, 
+                                  round((1-(Partner_Total/Extended_Price__c))*100,2))))
+
+
+```
+
+```{r}
+names(QuoteLine01)
+```
+
+```{r}
+QuoteLine01 <- QuoteLine01 %>% select(SBQQ__Quote__c,
+                                      QuoteLine_Id,
+                                      SBQQ__Product__c,
+                                      SBQQ__Group__c,
+                                      CurrencyIsoCode,
+                                      Extended_Price__c,
+                                      Discount,
+                                      Partner_Total,
+                                      SBQQ__PartnerTotal__c,
+                                      SBQQ__PartnerDiscount__c,
+                                      SBQQ__NetTotal__c)
+                                      
+```
+
+
+
+
+
+
+#Add on QuoteLine
+```{r}
+Main01 <- merge(Main, QuoteLine01, by.x = "Quote_Id",by.y = "SBQQ__Quote__c",all.x = TRUE)
+```
+
+
+
+
+#adjust dollar amounts for currencies
+```{r}
+C1 <- Currency %>% select(FiscalYear,Conversion,Base,To) %>% distinct()
+C2 <- C1 %>% filter(is.na(Conversion) == FALSE & FiscalYear == 2022) %>% filter(Conversion != 0) %>% rename(SplitPriceConversion = Conversion) %>% select(-FiscalYear) %>% distinct()
+
+Main01$QC <- "USD"
+```
+
+
+```{r}
+#Join on CurrencyIsoCode, created field in Main that is in USD
+Main02 <- merge(Main01, C2, by.x = c("CurrencyIsoCode","QC"),by.y = c("Base","To"),all.x = TRUE)
+```
+
+
+
+
+#Now add in Product
+```{r}
+Main03 <- merge(Main02,Product03, by.x = "SBQQ__Product__c",by.y = "Product2Id",all.x = TRUE)
+```
+
+
+
+
+
+#Bring in Account Info
+
+```{r}
+Account01 <- Account %>% rename(AccountId = Id, 
+                                Account_Type = Type, 
+                                Account_Name = Name, 
+                                Account_OwnerId = OwnerId, 
+                                Account_Territory_Id = Territory_ID__c) %>% 
+                         select(-Partner_Level__c,-Focus_Partner__c, -Nationwide_Partner_for_Channel_Comms__c)
+
+Main04 <- merge(Main03,Account01, by = "AccountId",all.x = TRUE)
+```
+
+
+
+
+#Reseller
+```{r}
+Reseller <- Account %>% rename(Reseller__c = Id, 
+                               Reseller_Type = Type, 
+                               Reseller_Name = Name, 
+                               Reseller_OwnerId = OwnerId, 
+                               Reseller_Territory_ID__c = Territory_ID__c) %>% 
+  
+                        select(Reseller__c, 
+                               Reseller_Name, 
+                               Reseller_Type, 
+                               Partner_Level__c,
+                               Focus_Partner__c,
+                               Nationwide_Partner_for_Channel_Comms__c,
+                               Reseller_OwnerId,
+                               Reseller_Territory_ID__c)
+
+Main05 <- merge(Main04,Reseller, by = "Reseller__c", all.x = TRUE)
+
+```
+
+
+#Add in User
+```{r}
+Main06 <- merge(Main05,User01, by.x = "Opportunity_OwnerId", by.y = "User_Id",all.x = TRUE )
+
+```
+
+
+
+#merge with QuoteLine
+
+```{r}
+Main07 <- merge(Main06, QuoteLineGroup01, by.x = "SBQQ__Group__c", by.y = "Id",all.x = TRUE)
+```
+
+
+
+
+```{r}
+temp <- Main07 %>% select(Opportunity_Id,Quote_Id, QuoteLine_Id, SBQQ__Primary__c,CloseDate,CreatedDate, Quote_CreatedDate, SBQQ__Group__c,SBQQ__Number__c, SBQQ__Optional__c,Group_Name,Amount)
+```
+
+```{r}
+temp01 <- temp %>% arrange(Opportunity_Id) %>% group_by(Opportunity_Id)
+```
+
+
+```{r}
+temp05 <- temp01 %>% mutate(Required_or_Optional = ifelse(is.na(SBQQ__Optional__c) == T | SBQQ__Optional__c == "FALSE","Required","Optional")) %>% mutate(Is_Num_Chosen = ifelse(Required_or_Optional == "Required", "Yes", "No"))
+```
+
+
+
+
+
+
+#Create Required/Optional Field
+```{r}
+Main07 <- Main07 %>% mutate(Required_or_Optional = ifelse(is.na(SBQQ__Optional__c) == T | SBQQ__Optional__c == "TRUE","Optional","Required")) %>% mutate(Is_Num_Chosen = ifelse(Required_or_Optional == "Required", "Yes", "No"))
+```
+```{r}
+temp123 <- Main07 %>% select(Opportunity_Id,Required_or_Optional,SBQQ__Optional__c)
+```
+
+
+
+```{r}
+Subscription02 <- merge(Subscription01,Product03, by.x = "SBQQ__Product__c", by.y = "Product2Id", all.x = TRUE)
+```
+
+```{r}
+CSub13 <- Subscription02 %>% select(SBQQ__Account__c, Grouping, SubStartDate) %>% filter(is.na(Grouping) == F)
+
+```
+
+```{r}
+CSub13$grouping <- paste(CSub13$SBQQ__Account__c, CSub13$Grouping)
+CSub13$value <- 1
+CSub13 <- CSub13 %>% arrange(SBQQ__Account__c, SubStartDate)
+CSub13$EarliestFamily <- ave(CSub13$value, CSub13$grouping, FUN = cumsum)
+CSub14 <- CSub13 %>% filter(EarliestFamily == 1) %>% select(grouping, SubStartDate) %>% rename(EarliestFamilyStartDate = SubStartDate)
+```
+
+
+```{r}
+CSub15 <- Subscription02 %>% select(SBQQ__Account__c, IntraFamilyGrouping, SubStartDate) %>% filter(is.na(IntraFamilyGrouping) == F)
+CSub15$grouping <- paste(CSub15$SBQQ__Account__c, CSub15$IntraFamilyGrouping)
+CSub15$value <- 1
+CSub15 <- CSub15 %>% arrange(SBQQ__Account__c, SubStartDate)
+CSub15$EarliestFamily <- ave(CSub15$value, CSub15$grouping, FUN = cumsum)
+CSub16 <- CSub15 %>% filter(EarliestFamily == 1) %>% select(grouping, SubStartDate) %>% rename(EarliestProductPairingStartDate = SubStartDate)
+```
+
+```{r}
+CSub17 <- Subscription02 %>% select(SBQQ__Account__c, Product, SubStartDate) %>% filter(is.na(Product) == F)
+CSub17$grouping <- paste(CSub17$SBQQ__Account__c, CSub17$Product)
+CSub17$value <- 1
+CSub17 <- CSub17 %>% arrange(grouping, SubStartDate)
+CSub17$EarliestFamily <- ave(CSub17$value, CSub17$grouping, FUN = cumsum)
+CSub18 <- CSub17 %>% filter(EarliestFamily == 1) %>% select(grouping, SubStartDate) %>% rename(EarliestProductStartDate = SubStartDate)
+```
+
+```{r}
+CSub19 <- Subscription02 %>% select(SBQQ__Account__c, ProductPairing2, SubStartDate) %>% filter(is.na(ProductPairing2) == F)
+CSub19$grouping <- paste(CSub19$SBQQ__Account__c, CSub19$ProductPairing2)
+CSub19$value <- 1
+CSub19 <- CSub19 %>% arrange(grouping, SubStartDate)
+CSub19$EarliestFamily <- ave(CSub19$value, CSub19$grouping, FUN = cumsum)
+CSub20 <- CSub19 %>% filter(EarliestFamily == 1) %>% select(grouping, SubStartDate) %>% rename(EarliestProductPairing2StartDate = SubStartDate)
+```
+
+```{r}
+CSub21 <- Subscription02 %>% select(SBQQ__Account__c,SubStartDate) %>% filter(is.na(SBQQ__Account__c) == F)
+CSub21$grouping <- paste(CSub21$SBQQ__Account__c)
+CSub21$value <- 1
+CSub21 <- CSub21 %>% arrange(SBQQ__Account__c, SubStartDate)
+CSub21$EarliestAccount <- ave(CSub21$value, CSub21$grouping, FUN = cumsum)
+CSub22 <- CSub21 %>% filter(EarliestAccount == 1) %>% select(grouping, SubStartDate) %>% rename(EarliestAccountStartDate = SubStartDate)
+```
+
+```{r}
+Main07 <- Main07 %>% mutate(FamilyAccountGrouping = paste(AccountId, Grouping),
+                            ProductPairingAccountGrouping = paste(AccountId, IntraFamilyGrouping),
+                            ProductAccountGrouping = paste(AccountId, Product),
+                            ProductPairing2AccountGrouping = paste(AccountId, ProductPairing2))
+```
+
+```{r}
+Main08 <- merge(Main07, CSub14, by.x = "FamilyAccountGrouping", by.y = "grouping", all.x = TRUE)
+Main09 <- merge(Main08, CSub16, by.x = "ProductPairingAccountGrouping", by.y = "grouping", all.x = TRUE)
+Main10 <- merge(Main09, CSub18, by.x = "ProductAccountGrouping", by.y = "grouping", all.x = TRUE)
+Main11 <- merge(Main10, CSub20, by.x = "ProductPairing2AccountGrouping", by.y = "grouping", all.x = TRUE)
+```
+
+```{r}
+Main12 <- merge(Main11,CSub22, by.x = "AccountId", by.y = "grouping",all.x = TRUE)
+```
+
+```{r}
+Main12$Days_Ago <- as.Date(Main12$CloseDate) - as.Date(Main12$EarliestAccountStartDate)
+Main12$New_Logo <- ifelse(is.na(Main12$Days_Ago), 1, ifelse(Main12$Days_Ago <= 30, 1, 0))
+
+Main12$Family_Days_Ago <- as.Date(Main12$CloseDate) - as.Date(Main12$EarliestFamilyStartDate)
+Main12$NewFamily <- ifelse(is.na(Main12$Family_Days_Ago) == F & (Main12$Family_Days_Ago >= 31 & Main12$Family_Days_Ago > 0), 0, 1)
+#Legacy Migration
+Main12$ProductPairing_Days_Ago <- as.Date(Main12$CloseDate) - as.Date(Main12$EarliestProductPairingStartDate)
+Main12$NewProductPairing <- ifelse(is.na(Main12$ProductPairing_Days_Ago) == F &  (Main12$ProductPairing_Days_Ago >= 31 & Main12$ProductPairing_Days_Ago > 0), 0, 1)
+```
+
+
+```{r}
+Main12$ProductPairing2_Days_Ago <- as.Date(Main12$CloseDate) - as.Date(Main12$EarliestProductPairing2StartDate)
+Main12$NewProductPairing2 <- ifelse(is.na(Main12$ProductPairing2_Days_Ago) == F &  Main12$ProductPairing2_Days_Ago >= 31, 0, 1)
+#Migration
+Main12$Product_Days_Ago <- as.Date(Main12$CloseDate) - as.Date(Main12$EarliestProductStartDate)
+Main12$NewProduct <- ifelse(is.na(Main12$Product_Days_Ago) == F & (Main12$Product_Days_Ago >= 31 & Main12$Product_Days_Ago > 0), 0, 1)
+```
+
+
+
+```{r}
+Main12$Sales.Category <- ifelse(Main12$New_Logo == 1, "New Logo",
+                                     ifelse(Main12$NewFamily == 1, "Cross Sell",
+                                            ifelse(Main12$NewProductPairing == 1, "Family Upsell",
+                                                   ifelse(Main12$NewProductPairing2 == 1, "Migration",
+                                                          ifelse(Main12$NewProduct == 1 , "Legacy Migration",
+                                                                 ifelse(Main12$Migration == 1, "IntraProduct Upgrade", "Product Upsell"))))))
+                               
+```
+
+```{r}
+Main13 <-  merge(Main12,Record_Type01, by = "RecordTypeId",all.x = TRUE)
+```
+
+
+```{r}
+Main14 <- Main13 %>% filter(Record_Name %in% c("Locked New Business","New Business") & Business_Group__c == "Core")
+```
+
+
+```{r}
+Main15 <- merge(Main14,Terr01, by.x ="Account_Territory_Id",by.y = "Id", all.x = TRUE)
+```
+
+
+
+
+
+
+```{r}
+Main16 <- Main15 %>% select(Account_Name,
+                            SBQQ__Group__c,
+                            Reseller_Name,
+                            Opportunity_Id,
+                            Opportunity_Name,
+                            Quote_Id,
+                            QuoteLine_Id,
+                            Amount,
+                            CreatedDate,
+                            CloseDate,
+                            Quote_CreatedDate,
+                            SBQQ__SubscriptionTerm__c,
+                            Deal_Reg_Type__c,
+                            prod_subtype__c,
+                            QC,
+                            Extended_Price__c,
+                            Discount,
+                            Partner_Total,
+                            SBQQ__PartnerTotal__c,
+                            SBQQ__PartnerDiscount__c,
+                            SBQQ__NetTotal__c,
+                            LeadSource,
+                            Migration__c,
+                            StageName,
+                            FiscalYear,
+                            Quarter,
+                            SBQQ__Primary__c,
+                            Base_SKU__c,
+                            Product,
+                            Grouping,
+                            Employees_Formula__c,
+                            Partner_Level__c,
+                            Nationwide_Partner_for_Channel_Comms__c,
+                            Rep_Name,
+                            Group_Name,
+                            Required_or_Optional,
+                            Sales.Category,
+                            Sub_Territory__c,
+                            Sub_Theater__c,
+                            Territory__c,
+                            Theater__c,
+                            Region__c)
+```
+
+
+```{r}
+#write.csv(Main16,"Pipeline.csv", row.names = FALSE)
+```
+
+```{r}
+Main16 <- Main16 %>% mutate(Amount_ACV = (Amount / ifelse(is.na(prod_subtype__c) | prod_subtype__c == "" | prod_subtype__c == "DC", 1,
+                                                   ifelse(is.na(SBQQ__SubscriptionTerm__c),1,
+                                                          ifelse(SBQQ__SubscriptionTerm__c < 12, 1, SBQQ__SubscriptionTerm__c / 12)
+                                                          )
+                                                   )
+                                   )
+                            )
+
+Main16 <- Main16 %>% mutate(Amount_TCV = ifelse(is.na(prod_subtype__c) | prod_subtype__c == "" | prod_subtype__c == "DC", Amount_ACV, Amount))
+```
+if NA put to 0
+```{r}
+Main16 <- Main16 %>% mutate(ACV = (SBQQ__NetTotal__c / ifelse(is.na(prod_subtype__c) | prod_subtype__c == "" | prod_subtype__c == "DC", 1,
+                                                   ifelse(is.na(SBQQ__SubscriptionTerm__c),1,
+                                                          ifelse(SBQQ__SubscriptionTerm__c < 12, 1, SBQQ__SubscriptionTerm__c / 12)
+                                                          )
+                                                   )
+                                   )
+                            )
+
+Main16 <- Main16 %>% mutate(TCV = ifelse(is.na(prod_subtype__c) | prod_subtype__c == "" | prod_subtype__c == "DC", ACV, SBQQ__NetTotal__c))
+```
+
+
+```{r}
+Main16$ACV <- Main16$ACV %>% replace_na(0)
+Main16$TCV <- Main16$TCV %>% replace_na(0)
+```
+
+
+
+
+```{r}
+Main17 <- Main16 %>% select(Account_Name,
+                            SBQQ__Group__c,
+                            Reseller_Name,
+                            Opportunity_Id,
+                            Opportunity_Name,
+                            Quote_Id,
+                            QuoteLine_Id,
+                            Amount,
+                            CreatedDate,
+                            CloseDate,
+                            Quote_CreatedDate,
+                            SBQQ__SubscriptionTerm__c,
+                            Deal_Reg_Type__c,
+                            prod_subtype__c,
+                            ACV,
+                            TCV,
+                            Amount_ACV,
+                            Amount_TCV,
+                            Extended_Price__c,
+                            Discount,
+                            Partner_Total,
+                            SBQQ__PartnerTotal__c,
+                            SBQQ__PartnerDiscount__c,
+                            SBQQ__NetTotal__c,
+                            QC,
+                            LeadSource,
+                            Migration__c,
+                            StageName,
+                            FiscalYear,
+                            Quarter,
+                            SBQQ__Primary__c,
+                            Base_SKU__c,
+                            Product,
+                            Grouping,
+                            Employees_Formula__c,
+                            Partner_Level__c,
+                            Nationwide_Partner_for_Channel_Comms__c,
+                            Rep_Name,
+                            Group_Name,
+                            Required_or_Optional,
+                            Sales.Category,
+                            Sub_Territory__c,
+                            Sub_Theater__c,
+                            Territory__c,
+                            Theater__c,
+                            Region__c)
+```
+
+
+```{r}
+Main18 <- round_df(Main17,2)
+```
+
+```{r}
+Main19 <- Main18 %>% arrange(Account_Name)
+```
+
+```{r}
+Validation <- Main19 %>% select(Account_Name,SBQQ__Group__c, Required_or_Optional,Opportunity_Id,CreatedDate,CloseDate,Quote_CreatedDate,Quote_Id,SBQQ__Primary__c,QuoteLine_Id,SBQQ__SubscriptionTerm__c,ACV,TCV,Amount_ACV,Amount_TCV,Amount,Extended_Price__c,Discount,Partner_Total,SBQQ__PartnerTotal__c,SBQQ__PartnerDiscount__c,SBQQ__NetTotal__c)
+```
+
+
+
+
+```{r}
+Validation01 <- Validation %>% arrange(Account_Name,Opportunity_Id,Quote_Id,QuoteLine_Id)
+```
+
+
+```{r}
+Validation01 <- Validation01 %>% filter(Required_or_Optional == "Required")
+```
+
+```{r}
+Validation01 <- Validation01 %>% select(Account_Name,SBQQ__Group__c,Required_or_Optional,Opportunity_Id,Quote_Id,QuoteLine_Id,Amount,SBQQ__NetTotal__c)
+```
+
+```{r}
+Validation01 <- Validation01 %>% 
+  group_by(Opportunity_Id, Quote_Id) %>% 
+  mutate(cumsum_NetTotal = cumsum(SBQQ__NetTotal__c),
+         Aggregate_NetTotal = sum(SBQQ__NetTotal__c),
+         Is_Accurate = ifelse(is.na(Aggregate_NetTotal) == T, "No Quote Lines on Quote",ifelse(is.na(Amount) == T, "No Amount on Opp",
+                              ifelse(abs(Aggregate_NetTotal - Amount) <= 0.05*Amount,"True","False")))
+        )
+```
+
+
+
+```{r}
+Validation02 <- Validation01
+```
+
+```{r}
+Validation02 <- Validation02 %>% select(Opportunity_Id,Amount,Aggregate_NetTotal,Is_Accurate) %>% distinct() %>% filter(is.na(Quote_Id) == F)
+```
+
+```{r}
+Validation02 <- Validation02 %>% mutate(Aggregate_NetTotal = ifelse(is.na(Aggregate_NetTotal) == T, 0,Aggregate_NetTotal))
+table(Validation02$Is_Accurate)
+
+```
+
+
+```{r}
+#Validation03 <- Validation01 %>% select(Opportunity_Id,SBQQ__NetTotal__c,Amount)
+```
+```{r}
+#write_xlsx(Validation03,"test1.xlsx")
+```
+
+
+```{r}
+
+Main19 <- Main19 %>% mutate(New_Logo = ifelse(Sales.Category == "New Logo" & is.na(Grouping) == F & Grouping != "Other" & Grouping != "Professional Services",1,0),
+                            Cross_Sell = ifelse(Sales.Category == "Cross Sell" & is.na(Grouping) == F & Grouping != "Other" & Grouping != "Professional Services",1,0),
+                            Family_Upsell = ifelse(Sales.Category == "Family Upsell" & is.na(Grouping) == F & Grouping != "Other" & Grouping != "Professional Services",1,0),
+                            Migration = ifelse(Sales.Category == "Migration" & is.na(Grouping) == F & Grouping != "Other" & Grouping != "Professional Services",1,0),
+                            Legacy_Migration = ifelse(Sales.Category == "Legacy Migration" & is.na(Grouping) == F & Grouping != "Other" & Grouping != "Professional Services",1,0),
+                            Product_Upsell = ifelse(Sales.Category == "Product Upsell" & is.na(Grouping) == F & Grouping != "Other" & Grouping != "Professional Services",1,0),
+                            Product_Upgrade = ifelse(Sales.Category == "IntraProduct Upgrade" & is.na(Grouping) == F & Grouping != "Other" & Grouping != "Professional Services",1,0)) %>%
+  group_by(Opportunity_Id,Required_or_Optional)
+
+```
+
+
+```{r}
+
+Main20 <- Main19 %>% select(-SBQQ__PartnerTotal__c)
+
+Main20 <- Main20 %>% mutate(Opp_New_Logo = sum(New_Logo),
+                            Opp_Cross_Sell = sum(Cross_Sell),
+                            Opp_Family_Upsell = sum(Family_Upsell),
+                            Opp_Migration = sum(Migration),
+                            Opp_Legacy_Migration = sum(Legacy_Migration),
+                            Opp_Product_Upsell = sum(Product_Upsell),
+                            Opp_Product_Upgrade = sum(Product_Upgrade))
+```
+
+
+```{r}
+MixedCat <- Main20 %>% select(Account_Name,SBQQ__Group__c,Opportunity_Id,Required_or_Optional,Quote_Id,QuoteLine_Id,Sales.Category, New_Logo,Cross_Sell,Family_Upsell,Migration,Legacy_Migration,Product_Upsell,Opp_New_Logo,Opp_Cross_Sell,Opp_Product_Upgrade,Opp_Family_Upsell,Opp_Migration,Opp_Legacy_Migration,Opp_Product_Upsell)
+```
+
+```{r}
+MixedCat <- MixedCat %>% mutate(Opp.Category = 
+                                  ifelse(Opp_Product_Upgrade > 0 ,
+                                         ifelse(Opp_Legacy_Migration > 0,
+                                                ifelse(Opp_Migration > 0, "Rip and Replace, Legacy Migration, and Product Migration","Rip and Replace and Legacy Migration"),
+                                                ifelse(Opp_Migration > 0, "Rip and Replace and Migration","Rip and Replace")),
+                                                      ifelse(Opp_Legacy_Migration > 0 & Opp_Migration > 0 ,
+                                                             "Legacy Migration and Migration",
+                                                             ifelse(Opp_Legacy_Migration > 0,
+                                                                    "Legacy Migration",
+                                                                    ifelse(Opp_Migration > 0,
+                                                                           "Migration",
+                                                                           "NA")))))
+```
+
+
+```{r}
+MixedCat <- MixedCat %>% mutate(Category = ifelse(Opp.Category != "NA",Opp.Category, ifelse(Opp_Cross_Sell > 0, "Cross Sell", ifelse(Opp_Family_Upsell > 0, "Family Upsell",ifelse(Opp_Product_Upsell > 0, "Product Upsell","None")))))
+```
+
+
+
+```{r}
+Main20 <- Main20 %>% mutate(Opp.Category = ifelse(Opp_New_Logo > 0 , "New Logo",
+                                              ifelse(Opp_Product_Upgrade > 0 | Opp_Legacy_Migration > 0,
+                                                ifelse(Opp_Migration > 0,
+                                                       ifelse(Opp_Cross_Sell > 0 | Opp_Family_Upsell > 0, "Rip and Replace, Migration and Upsell/Cross Sell",
+                                                              "Rip and Replace, and Migration"),
+                                                       ifelse(Opp_Cross_Sell > 0 | Opp_Family_Upsell > 0, "Rip and Replace and Upsell/Cross Sell","Rip and Replace")),
+                                                       
+                                                  ifelse(Opp_Migration > 0,
+                                                       ifelse(Opp_Cross_Sell > 0 | Opp_Family_Upsell > 0, "Migration and Upsell/Cross Sell",
+                                                              "Migration"),
+                                                       ifelse(Opp_Cross_Sell > 0 | Opp_Family_Upsell > 0, "Upsell/Cross Sell","None")))))
+                                                       
+                                                       
+                                                       
+  
+```
+
+```{r}
+Main21 <- Main20 %>% select(-New_Logo,-Cross_Sell,-Family_Upsell,-Migration,-Legacy_Migration,-Product_Upsell,-Product_Upgrade)
+```
+
+```{r}
+names(Main21)
+```
+
+
+```{r}
+Main21 <- Main21 %>% mutate(Link = paste("https://barracuda2018.lightning.force.com/",Opportunity_Id))
+```
+
+
+
+0065x000025MYijAAG FirstPass Engineering
+
+
+
+
+```{r}
+May_Validation <- read_xlsx("AMER New Pipeline Validation.xlsx")
+```
+```{r}
+names(May_Validation)
+```
+
+
+
+
+```{r}
+OppFound <- as.data.frame(intersect(May_Validation$FullOppID,Main21$Opportunity_Id))
+Opp_NotFound <- as.data.frame(setdiff(May_Validation$FullOppID,Main21$Opportunity_Id))
+```
+
+```{r}
+names(OppFound)
+```
+
+```{r}
+Opp_NotFound <- Opp_NotFound %>% rename(Opp_Id = "setdiff(May_Validation$FullOppID, Main21$Opportunity_Id)")
+OppFound <- OppFound %>% rename(Opp_Id = "intersect(May_Validation$FullOppID, Main21$Opportunity_Id)")
+```
+
+```{r}
+write_xlsx(OppFound,"OppsFound.xlsx")
+write_xlsx(Opp_NotFound,"Opps_NotFound.xlsx")
+```
+
+```{r}
+Full_OppNotFound <- merge(Opp_NotFound,May_Validation, by.x = "Opp_Id",by.y = "FullOppID")
+```
+
+```{r}
+Full_OppNotFound <- Full_OppNotFound %>% filter(is.na(Opp_Id == F))
+```
+
+```{r}
+write_xlsx(Full_OppNotFound,"Info_Unmatched_Opps.xlsx")
+```
+
+```{r}
+
+Full_OppFound <- merge(OppFound,May_Validation, by.x = "Opp_Id",by.y = "FullOppID")
+```
+
+```{r}
+test1 <- merge(OppFound,Main21, by.x = "Opp_Id",by.y = "Opportunity_Id")
+```
+
+```{r}
+test2 <- test1 %>% group_by(Opp_Id,Required_or_Optional) %>% distinct()
+```
+
+
+
+```{r}
+write_xlsx(Full_OppFound,"Info_Matched_Opps.xlsx")
+```
+
+#create hyperlink to opportunity, paste ID with salesforce url
+#check if all optional is true
+```{r}
+names(Main21)
+```
+
+```{r}
+Main21 <- Main21 %>% ungroup() %>% group_by(Opportunity_Id,Quote_Id) %>% mutate(value = ifelse(Required_or_Optional == "Required",1,0), check = sum(value)) %>% mutate(Required_or_Optional = ifelse(check >  0 | is.na(check), as.character(Required_or_Optional), "Required (Only Optional)"))
+```
+
+```{r}
+write_xlsx(Main21,"Pipeline.xlsx")
+```
+
+
+
+
+
+0065x000024lnLMAAY
+
+
+
+
+
+
+
+
+
+
+
+
+goal is for BJ to know at the rep level , what sales category pipelines are being made against
+
+
+rename legacy migration to rip and replace
+
+5) ($/Termmonths) * 12
+
+
+1) create discounting logic
+2) Make Adjustment to Quote Object(Add created date into logic for primary quote)
+3) Bring in AE/TM mapping 
+4) Calculate ACV
+6)if prodsubtype is null, blank or = DC, then TCV = ACV.
+
+
+
+
+
+
+
+

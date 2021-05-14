@@ -1,0 +1,67 @@
+Sub.Product,Product,ProductPairing2,IntraFamilyGrouping,Grouping
+WAF Bot Protection,Bot Protection,Bot Protection,Bot Protection,Application Security
+WAF Public Cloud Bot Protection,Bot Protection,Bot Protection,Bot Protection,Application Security
+WAFaaS Bot Protection,Bot Protection,Bot Protection,Bot Protection,Application Security
+Load Balancer,Load Balancer,Load Balancer,WAF,Application Security
+WAF,WAF,WAF,WAF,Application Security
+WAF Public Cloud,WAF,WAF,WAF,Application Security
+Control Center WAF Public Cloud,WAF Other,WAF Other,WAF Other,Application Security
+Control Center WAF,WAF Other,WAF Other,WAF Other,Application Security
+Control Server,WAF Other,WAF Other,WAF Other,Application Security
+WAFaaS,WAFaaS,WAFaaS,WAFaaS,Application Security
+Backup 7x-,Backup 7x-,Backup 7x-,Backup,Data Protection
+Legacy Backup,Legacy Backup,Backup 7x-,Backup,Data Protection
+Backup 8x+,Backup 8x+,Backup 8x+,Backup,Data Protection
+BCAS,BCAS,Cloud Archiving,Archiving,Email
+Legacy BCAS,Legacy BCAS,Cloud Archiving,Archiving,Email
+Message Archiver,Message Archiver,Message Archiving,Archiving,Email
+CCB,CCB,CCB,CCB,Email
+Legacy CCB,Legacy CCB,CCB,CCB,Email
+ESG,ESG,ESG,Essentials,Email
+ESG Public Cloud,ESG,ESG,Essentials,Email
+Essentials,Essentials,Essentials,Essentials,Email
+Essentials MSP,Essentials,Essentials,Essentials,Email
+Essentials ATP,Essentials,Essentials,Essentials,Email
+Essentials ES,Essentials,Essentials,Essentials,Email
+Essentials PS,Essentials,Essentials,Essentials,Email
+Legacy Essentials,Legacy Essentials,Essentials,Essentials,Email
+Legacy Essentials ES,Legacy Essentials,Essentials,Essentials,Email
+Legacy Essentials ATP,Legacy Essentials,Essentials,Essentials,Email
+Legacy Essentials Compliance,Legacy Essentials,Essentials,Essentials,Email
+Legacy Essentials Complete,Legacy Essentials,Essentials,Essentials,Email
+Forensics,Forensics,Forensics,Forensics,Email
+Phishline,Phishline,Phishline,Phishline,Email
+Legacy Phishline,Legacy Phishline,Phishline,Phishline,Email
+Sentinel,Sentinel,Sentinel,Sentinel,Email
+Legacy Sentinel,Legacy Sentinel,Sentinel,Sentinel,Email
+CG WAN,CG WAN,CG WAN,CG WAN,Network Security
+CGA,CGA,CGA,CGA,Network Security
+CGF F,CGF F,CGF F,CGF,Network Security
+CGF Public Cloud,CGF F,CGF F,CGF,Network Security
+CGF X,CGF X,CGF F,CGF,Network Security
+Link Balancer,Link Balancer,CGF F,CGF,Network Security
+SSL VPN,SSL VPN,CGF F,CGF,Network Security
+CGF Other,CGF Other,CGF Other,CGF Other,Network Security
+Control Center,CGF Other,CGF Other,CGF Other,Network Security
+Control Center Public Cloud,CGF Other,CGF Other,CGF Other,Network Security
+Secure Access Controller,CGF Other,CGF Other,CGF Other,Network Security
+Secure Access Controller Public Cloud,CGF Other,CGF Other,CGF Other,Network Security
+Secure Connector,CGF Other,CGF Other,CGF Other,Network Security
+Cloud Security Guardian,CSG,CSG,CSG,Network Security
+Reporting Server,Reporting Server,Reporting Server,Reporting Server,Network Security
+WFS,WFS,WFS,WFS,Network Security
+Essentials Account,Essentials Account,Essentials Account,Essentials Account,Other
+Essentials Bundle SKU,Essentials Bundle SKU,Essentials Bundle SKU,Essentials Bundle SKU,Other
+BOS,Other,Other,Other,Other
+C2C,Other,Other,Other,Other
+Echo,Other,Other,Other,Other
+Freight & Shipping,Other,Other,Other,Other
+MW,Other,Other,Other,Other
+Other,Other,Other,Other,Other
+SignNow,Other,Other,Other,Other
+Sonian,Other,Other,Other,Other
+Sookasa,Other,Other,Other,Other
+Content Shield,Content Shield,Content Shield,WSG,Web Security
+WSG,WSG,WSG,WSG,Web Security
+Data Inspector,Data Inspector,Data Inspector,Data Inspector,Email
+Professional Services,Professional Services,Professional Services,Professional Services,Professional Services

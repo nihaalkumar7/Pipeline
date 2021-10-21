@@ -34,15 +34,16 @@ Subscription <- sf_query_bulk_v1("SELECT Id, SBQQ__Product__c, SBQQ__Quantity__c
 QuoteLineGroup <- sf_query_bulk_v1("SELECT Id, SBQQ__Number__c, SBQQ__Optional__c, SBQQ__Quote__c,Name FROM SBQQ__QuoteLineGroup__c",object_name = "SBQQ__QuoteLineGroup__c")
 QuoteLine <- sf_query_bulk_v1("SELECT CurrencyIsoCode, Extended_Price__c,Id,SBQQ__NetTotal__c,SBQQ__Quote__c,SBQQ__PartnerDiscount__c,SBQQ__PartnerTotal__c, SBQQ__Product__c,SBQQ__Group__c,SBQQ__SubscriptionTerm__c, SBCF_Document_Term__c FROM SBQQ__QuoteLine__c", object_name = "SBQQ__QuoteLine__c")
 
-setwd("C:/Users/nikumar/OneDrive - Barracuda Networks, Inc/Desktop/R Projects/Pipeline")
-Currency <- read.csv("Currency.csv")
 
-setwd("C:/Users/nikumar/OneDrive - Barracuda Networks, Inc/Desktop/R Projects/Pipeline")
+#Load FX rates
+CudaAzure <- dbConnect(odbc(), "CudaAzure1", uid = "jori", pwd = "xm2!p49kl")
+Currency <- dbReadTable(CudaAzure,"SalesOperationsCurrency")
+
+#setwd("C:/Users/nikumar/OneDrive - Barracuda Networks, Inc/Desktop/R Projects/Pipeline")
 #Prod_Category <- read.csv("Product Category Mapping.csv")
 #Pseudo_Prod_Category <- read.csv("Pseudo Product Family Mapping.csv")
 
-
-
+#Load custom product mapping and hierarchy
 CudaAzure <- dbConnect(odbc(), "CudaAzure1", uid = "jori", pwd = "xm2!p49kl")
 Prod_Category <- dbReadTable(CudaAzure, "SalesOperationsSubProductMapping")  
 Pseudo_Prod_Category <- dbReadTable(CudaAzure,"SalesOperationsProductHierarchy")
@@ -55,12 +56,23 @@ EB12 <- EB11 %>% select(Essentials.Bundle, Configured.Products, Product.Count)
 
 #Rename Fields for consistency
 Product01 <- Product %>% rename(Product2Id = Id)
-Opp01 <- Opp %>% rename(Opportunity_Id = Id, Opportunity_OwnerId = OwnerId,Opportunity_Name = Name, OpportunityCurrency = CurrencyIsoCode)
-Quotes01 <- Quotes %>% rename(Quote_Id = Id, Opportunity_Id = SBQQ__Opportunity2__c, Quote_CreatedDate = Created_Date__c, Quote_SubscriptionTerm = SBQQ__SubscriptionTerm__c)
+Opp01 <- Opp %>% mutate(Amount = as.numeric(Amount), CloseDate = as.Date(CloseDate)) %>%
+  rename(Opportunity_Id = Id, Opportunity_OwnerId = OwnerId,Opportunity_Name = Name, OpportunityCurrency = CurrencyIsoCode)
+Quotes01 <- Quotes %>% mutate(Created_Date__c = as.Date(Created_Date__c)) %>%
+  rename(Quote_Id = Id, Opportunity_Id = SBQQ__Opportunity2__c, Quote_CreatedDate = Created_Date__c, Quote_SubscriptionTerm = SBQQ__SubscriptionTerm__c)
 Terr01 <- Terr %>% rename(Sub_Territory__c = Sub_Territory2__c, Territory__c = Territory2__c, Region__c = Region2__c, Sub_Theater__c = Sub_Theater2__c, Theater__c = Theater2__c,Territory_Name = Name)
 User01 <- User %>% rename(User_Id = Id, Rep_Name = Name)
-Subscription01 <- Subscription %>% rename(SubStartDate = SBQQ__StartDate__c, SubEndDate = SBQQ__EndDate__c,Subscription_Id = Id)
-QuoteLine01 <- QuoteLine %>% mutate(SBQQ__SubscriptionTerm__c = ifelse(is.na(SBQQ__SubscriptionTerm__c) | SBQQ__SubscriptionTerm__c == "", SBCF_Document_Term__c, SBQQ__SubscriptionTerm__c)) %>% rename(QuoteLine_Id = Id)
+Subscription01 <- Subscription %>% mutate(SBQQ__Quantity__c = as.numeric(SBQQ__Quantity__c), SBQQ__StartDate__c = as.Date(SBQQ__StartDate__c), SBQQ__EndDate__c = as.Date(SBQQ__EndDate__c)) %>%
+  rename(SubStartDate = SBQQ__StartDate__c, SubEndDate = SBQQ__EndDate__c,Subscription_Id = Id)
+QuoteLine01 <- QuoteLine %>% mutate(Extended_Price__c = as.numeric(Extended_Price__c), SBQQ__NetTotal__c = as.numeric(SBQQ__NetTotal__c), SBQQ__PartnerDiscount__c = as.numeric(SBQQ__PartnerDiscount__c),
+                                    SBQQ__PartnerTotal__c = as.numeric(SBQQ__PartnerTotal__c), SBQQ__SubscriptionTerm__c = as.numeric(SBQQ__SubscriptionTerm__c), SBCF_Document_Term__c = as.numeric(SBCF_Document_Term__c),
+                                    SBCF_Effective_TermMonths_Calculated__c = as.numeric(SBCF_Effective_TermMonths_Calculated__c), SBQQ__EffectiveSubscriptionTerm__c = as.numeric(SBQQ__EffectiveSubscriptionTerm__c)) %>%
+  mutate(Term = round(ifelse(is.na(SBQQ__EffectiveSubscriptionTerm__c), 
+                       ifelse(is.na(SBCF_Effective_TermMonths_Calculated__c), 
+                              ifelse(is.na(SBQQ__SubscriptionTerm__c) | SBQQ__SubscriptionTerm__c == "", SBCF_Document_Term__c, SBQQ__SubscriptionTerm__c),
+                              SBCF_Effective_TermMonths_Calculated__c),
+                       SBQQ__EffectiveSubscriptionTerm__c), 1)) %>%
+  rename(QuoteLine_Id = Id, SBQQ__SubscriptionTerm__cOld = SBQQ__SubscriptionTerm__c, SBQQ__SubscriptionTerm__c = Term)
 QuoteLineGroup01 <- QuoteLineGroup %>% rename(Group_Name = Name)
 Record_Type01 <- Record_Type %>% rename(RecordTypeId = Id, 
                                         Record_Name = Name)
@@ -79,23 +91,19 @@ Product03 <- Product03 %>% mutate(Sub.Product = ifelse(Bundle != "", as.characte
 Product04 <- merge(Product03, Pseudo_Prod_Category, by = "Sub.Product", all.x = TRUE)
 
 #Create Opportunity Dates
-Opp01$Month <- month(Opp01$CloseDate)
-Opp01$Year <- year(Opp01$CloseDate)
-Opp01$FiscalMonth <- ifelse(Opp01$Month < 3, Opp01$Month + 10, Opp01$Month - 2)
-Opp01$FiscalYear <- ifelse(Opp01$Month < 3, Opp01$Year, Opp01$Year + 1)
-Opp01$FiscalHalf <- paste(as.character(Opp01$FiscalYear), as.character(ifelse(Opp01$FiscalMonth < 7, 1, 2)), sep = "")
-Opp01$Quarter <- ifelse(Opp01$Month <= 2, 4, ifelse(Opp01$Month <= 5, 1, ifelse(Opp01$Month <= 8, 2, ifelse(Opp01$Month <= 11, 3, ifelse(Opp01$Month == 12, 4, "Error")))))
-Opp01$Semester <- ifelse(Opp01$FiscalMonth < 7, 1, 2)
-Opp01$Month <- ifelse(str_length(Opp01$Month) == 1, paste("0", Opp01$Month, sep = ""), Opp01$Month)
-Opp01$QuotaPeriod <- paste(Opp01$Year, Opp01$Month, sep = "")
-
-
-
-
+Opp01 <- Opp01 %>% mutate(Month = month(CloseDate),
+                          Year = year(CloseDate),
+                          FiscalMonth = ifelse(Month < 3, Month + 10, Month - 2),
+                          FiscalYear = ifelse(Month < 3, Year, Year + 1),
+                          FiscalHalf = paste(as.character(FiscalYear), as.character(ifelse(FiscalMonth < 7, 1, 2)), sep = ""),
+                          Quarter = ifelse(Month <= 2, 4, ifelse(Month <= 5, 1, ifelse(Month <= 8, 2, ifelse(Month <= 11, 3, ifelse(Month == 12, 4, "Error"))))),
+                          Semester = ifelse(FiscalMonth < 7, 1, 2),
+                          Month = ifelse(str_length(Month) == 1, paste("0", Month, sep = ""), Month),
+                          QuotaPeriod = paste(Year, Month, sep = ""))
 
 #filter opportunity
 Opp02 <- Opp01 %>% filter(CreatedDate >= as.Date("2019-09-01") | CloseDate >= as.Date("2020-03-01")) %>% filter(Business_Group__c == "Core")
-Opp02$CreatedDate <- as.Date(Opp02$CreatedDate)
+Opp02 <- Opp02 %>% mutate(CreatedDate = as.Date(CreatedDate))
 
 #Merge opportunity with Record Type
 #Filter for new business and core only
@@ -118,11 +126,8 @@ QuoteLine01 <- QuoteLine01 %>%
                            ifelse(SBQQ__NetTotal__c == 0 | Partner_Total == 0 | SBQQ__NetTotal__c < 0, 0, 
                                   round((1-(Partner_Total/Extended_Price__c))*100,2))))
 
-Test11 <- QuoteLine01 %>% select(QuoteLine_Id, Extended_Price__c, Discount, Partner_Total, SBQQ__PartnerDiscount__c, SBQQ__NetTotal__c)
-
-
+#Test11 <- QuoteLine01 %>% select(QuoteLine_Id, Extended_Price__c, Discount, Partner_Total, SBQQ__PartnerDiscount__c, SBQQ__NetTotal__c)
 #Test11 <- QuoteLine01 %>% mutate(ratio = Partner_Total/ SBQQ__PartnerTotal__c) %>% filter(ratio == 1)
-
 
 #Add on QuoteLine
 Main01 <- merge(Main, QuoteLine01, by.x = "Quote_Id",by.y = "SBQQ__Quote__c",all.x = TRUE)
@@ -174,8 +179,24 @@ Reseller <- Account %>% rename(Reseller__c = Id,
          Reseller_Territory_ID__c)
 Main05 <- merge(Main04, Reseller, by = "Reseller__c", all.x = TRUE)
 
-#Add in User
-Main06 <- merge(Main05, User01, by.x = "Opportunity_OwnerId", by.y = "User_Id",all.x = TRUE)
+#Add in opportunity owner
+CudaAzure <- dbConnect(odbc(), "CudaAzure1", uid = "jori", pwd = "xm2!p49kl")
+ARole13 <- dbReadTable(CudaAzure, "SalesOperationsRoles")  
+ARole13 <- ARole13 %>% select(Salesforce.User.Id, FY20.Sales.Plan, Month) %>% distinct()
+
+User02 <- User01 %>% rename(OppOwner = Rep_Name, OppOwnerTitle = Title)
+
+#Add close period
+Main05 <- Main05 %>% mutate(ClosePeriod = paste(year(CloseDate),
+                                                ifelse(str_length(month(CloseDate)) < 2, paste("0", month(CloseDate), sep = ""), month(CloseDate)), sep = ""))
+
+Main06.01 <- merge(Main05, User02, by.x = "Opportunity_OwnerId", by.y = "User_Id",all.x = TRUE)
+Main06 <- merge(Main06.01, ARole13, by.x = c("Opportunity_OwnerId", "ClosePeriod"), by.y = c("Salesforce.User.Id", "Month"), all.x = TRUE)
+
+#Finalize role
+Main06 <- Main06 %>% mutate(OppOwnerRole = ifelse(is.na(FY20.Sales.Plan), as.character(OppOwnerTitle), as.character(FY20.Sales.Plan)))
+
+#Test11 <- Main06 %>% select(ClosePeriod, OppOwner, OppOwnerRole) %>% distinct()
 
 #Add in Product
 Main07 <- merge(Main06, Product04, by.x = "SBQQ__Product__c",by.y = "Product2Id",all.x = TRUE)
@@ -187,10 +208,10 @@ Subscription02 <- merge(Subscription01, Product04, by.x = "SBQQ__Product__c", by
 CSub13 <- Subscription02 %>% select(SBQQ__Account__c, Grouping, SubStartDate) %>% filter(is.na(Grouping) == F)
 
 #New Logos
-CSub13$grouping <- paste(CSub13$SBQQ__Account__c, CSub13$Grouping)
-CSub13$value <- 1
-CSub13 <- CSub13 %>% arrange(SBQQ__Account__c, SubStartDate)
-CSub13$EarliestFamily <- ave(CSub13$value, CSub13$grouping, FUN = cumsum)
+CSub13 <- CSub13 %>% mutate(grouping = paste(SBQQ__Account__c, Grouping),
+                            value = 1) %>%
+  arrange(SBQQ__Account__c, SubStartDate) %>%
+  mutate(EarliestFamily = ave(value, grouping, FUN = cumsum))
 CSub14 <- CSub13 %>% filter(EarliestFamily == 1) %>% select(grouping, SubStartDate) %>% rename(EarliestFamilyStartDate = SubStartDate)
 
 #Cross Sell
@@ -308,7 +329,7 @@ Main16 <- Main15 %>% rename(Conversion = SplitPriceConversion) %>%
          Employees_Formula__c,
          Partner_Level__c,
          Nationwide_Partner_for_Channel_Comms__c,
-         Rep_Name,
+         OppOwner, OppOwnerRole,
          Group_Name,
          Required_or_Optional,
          Sales.Category,
@@ -319,7 +340,9 @@ Main16 <- Main15 %>% rename(Conversion = SplitPriceConversion) %>%
          Theater__c)
 
 #Opportunity amount ACV / TCV
-Main16 <- Main16 %>% mutate(Amount_TCV = Amount / Conversion,
+Main16 <- Main16 %>% mutate(Conversion = as.numeric(Conversion),
+                            SBQQ__SubscriptionTerm__c = as.numeric(SBQQ__SubscriptionTerm__c),
+                            Amount_TCV = Amount / Conversion,
                             Amount_ACV = (Amount_TCV / ifelse(is.na(prod_subtype__c) | prod_subtype__c == "" | prod_subtype__c == "DC", 1,
                                                               ifelse(is.na(SBQQ__SubscriptionTerm__c), 1,
                                                                      ifelse(SBQQ__SubscriptionTerm__c < 12, 1, SBQQ__SubscriptionTerm__c / 12)))),
@@ -384,7 +407,7 @@ Main17 <- Main16 %>% filter(!Product %in% c("Essentials Bundle SKU", "Essentials
          Employees_Formula__c,
          Partner_Level__c,
          Nationwide_Partner_for_Channel_Comms__c,
-         Rep_Name,
+         OppOwner, OppOwnerRole,
          Group_Name,
          Required_or_Optional,
          Sales.Category,
@@ -431,38 +454,41 @@ Main17 <- Main17 %>% ungroup() %>%
 session <- sf_auth(username, password, SecurityToken)
 
 #Load in hot list and user data
-AHL11 <- sf_query_bulk_v1("Select Id, Converted_Opportunity__c, CreatedDate, Lead_Source__c, MQL_Reason__c, Type__c, Disposition__c, Primary_On_Lead__c, OwnerId, CreatedById FROM Hot_List__c WHERE Converted_Opportunity__c != null",object_name = "Hot_List__c")
+'
+AHL11 <- sf_query_bulk_v1("Select Id, Converted_Opportunity__c, CreatedDate, Lead_Source__c, MQL_Reason__c, Type__c, Disposition__c, Primary_On_Lead__c, OwnerId, CreatedById FROM Hot_List__c WHERE Converted_Opportunity__c != null",
+object_name = "Hot_List__c", guess_types = FALSE)
 AUser11 <- sf_query_bulk_v1("SELECT Id, Name, Title from User",object_name = "User")
+'
+AHL11 <- sf_query_bulk("Select Id, Converted_Opportunity__c, CreatedDate, Lead_Source__c, MQL_Reason__c, Type__c, Disposition__c, Primary_On_Lead__c, OwnerId, CreatedById FROM Hot_List__c WHERE Converted_Opportunity__c != null",
+                       object_name = "Hot_List__c", guess_types = FALSE)
+AUser11 <- sf_query_bulk("SELECT Id, Name, Title from User", object_name = "User", guess_types = FALSE)
 
 #Hot list choice
-AHL11 <- AHL11 %>% mutate(value = 1,
+AHL11 <- AHL11 %>% mutate(CreatedDate1 = as.Date(substr(CreatedDate, 1, 10)),
+                          value = 1,
                           Count = ave(value, Converted_Opportunity__c, FUN = sum))
-AHL11 <- AHL11 %>% arrange(Converted_Opportunity__c, desc(Primary_On_Lead__c), CreatedDate) %>%
+AHL11 <- AHL11 %>% arrange(Converted_Opportunity__c, desc(Primary_On_Lead__c), CreatedDate1) %>%
   mutate(Choice = ave(value, Converted_Opportunity__c, FUN = cumsum),
          ConvertedValue = ifelse(is.na(Disposition__c) == F & Disposition__c == "Converted", 1, 0),
          OppConverted = ave(ConvertedValue, Converted_Opportunity__c, FUN = sum))
 
 AHL11 <- AHL11 %>% mutate(ConvertedValue2 = ifelse(Choice != 1, ConvertedValue, 0),
                           OppConverted2 = ave(ConvertedValue2, Converted_Opportunity__c, FUN = sum))
-AHL11 <- AHL11 %>% mutate(Month = paste(year(CreatedDate), ifelse(str_length(month(CreatedDate)) == 1, paste(0, month(CreatedDate), sep = ""), month(CreatedDate)), sep = ""))
+AHL11 <- AHL11 %>% mutate(Month = paste(year(CreatedDate1), ifelse(str_length(month(CreatedDate1)) == 1, paste(0, month(CreatedDate1), sep = ""), month(CreatedDate1)), sep = ""))
 
 AHL12 <- AHL11 %>% filter(Choice == 1) %>%
   select(Id, Converted_Opportunity__c, Id, Lead_Source__c, MQL_Reason__c, Type__c, OwnerId, CreatedById, Month)
 
-
-
-
-
 #Bring in quotas to mark owner and creator
-setwd("C:/Users/nikumar/OneDrive - Barracuda Networks, Inc/Desktop/R Projects/Pipeline")
+#setwd("C:/Users/nikumar/OneDrive - Barracuda Networks, Inc/Desktop/R Projects/Pipeline")
 #Replace new file with original
-Quotas <- read.csv("Additional Roles2.csv")
+#Quotas <- read.csv("Additional Roles2.csv")
 
 #Keep Add11 updated going forward
 #Add11 <- read.csv("Additional Roles.csv")
-Add11 <- read_xlsx("Additional Roles.xlsx")
-Add11 <- Add11 %>% select(-Key, -Count)
-
+#Add11 <- read_xlsx("Additional Roles.xlsx")
+#Add11 <- Add11 %>% select(-Key, -Count)
+'
 colnames(Add11)[1] <- "Salesforce.User.Id"
 RoleLength = ncol(Add11)
 Add12 <- Add11 %>% gather(ValidMonth, Month, 6:RoleLength) %>% filter(is.na(Month) == F & Salesforce.User.Id != "Months" & Salesforce.User.Id != "") %>% distinct() %>%
@@ -477,8 +503,11 @@ ARole11 <- ARole11 %>% mutate(value = 1,
 ARole12 <- ARole11 %>% filter(Choice == 1) %>%
   select(Salesforce.User.Id, FY20.Sales.Plan, Month)
 ARole13 <- rbind(ARole12, Add12) %>% distinct()
+'
 
-
+CudaAzure <- dbConnect(odbc(), "CudaAzure1", uid = "jori", pwd = "xm2!p49kl")
+ARole13 <- dbReadTable(CudaAzure, "SalesOperationsRoles")  
+ARole13 <- ARole13 %>% select(Salesforce.User.Id, FY20.Sales.Plan, Month) %>% distinct()
 
 #Join user for owner and created by
 AHL13 <- merge(AHL12, AUser11, by.x = "OwnerId", by.y = "Id", all.x = TRUE) %>%
@@ -490,34 +519,7 @@ AHL13 <- merge(AHL13, ARole13, by.x = c("OwnerId", "Month"), by.y = c("Salesforc
 AHL13 <- merge(AHL13, AUser11, by.x = "CreatedById", by.y = "Id", all.x = TRUE) %>% rename(HotListCreatedByName = Name, HotListCreatedByTitle = Title)
 AHL13 <- merge(AHL13, ARole13, by.x = c("CreatedById", "Month"), by.y = c("Salesforce.User.Id", "Month"), all.x = TRUE) %>% rename(HotListCreatedByQuotaTitle = FY20.Sales.Plan)
 
-
-
-
-
 user_list <- AHL13 %>% filter(!is.na(HotListOwnerTitle) & is.na(HotListOwnerQuotaTitle)) %>% select(Month,OwnerId,HotListOwnerName,HotListOwnerTitle)  %>% filter(Month > 201901) %>% distinct()
-
-
-#CODE TO LINK OLD ROLES WITH NEW#
-
-CudaAzure <- dbConnect(odbc(), "CudaAzure1", uid = "jori", pwd = "xm2!p49kl")
-Old_Roles <- dbReadTable(CudaAzure,"SalesOperationsRoles")
-
-Old_Roles <- Old_Roles %>% select(Salesforce.User.Id,FY20.Sales.Plan,Month)
-
-#add in old roles to additional roles file, upload that to data warehouse, and have script pull role information from the DW instead of csv
-
-
-#write.csv(Old_Roles01,"Old_Roles.csv",row.names = F)
-#user_list01 <- user_list %>% rename(Salesforce.User.Id = OwnerId,Name = HotListOwnerName,Title = HotListOwnerTitle)
-
-#test1 <- rbind(Old_Roles01,user_list01) 
-
-#test1 <- test1 %>% arrange(Salesforce.User.Id) %>% 
-
-#CudaAzure <- dbConnect(odbc(), "CudaAzure1", uid = "jori", pwd = "xm2!p49kl")
-#dbWriteTable(CudaAzure, "user_list", P21, overwrite = FALSE, append = TRUE)
-
-
 
 AHL13 <- AHL13 %>% mutate(HotListTitle = ifelse(is.na(HotListCreatedByQuotaTitle),
                                                 ifelse(is.na(HotListCreatedByTitle) | HotListCreatedByTitle == "Dev Team",
@@ -598,7 +600,6 @@ Main19 <- Main19 %>% mutate(OpportunityLink = paste("https://barracuda2018.light
 #Add opportunity level discounting logic
 #ACV, TCV and Extended are all in USD
 
-
 Main19 <- Main19 %>% mutate(grouping = paste(Opportunity_Id, Required_or_Optional),
                             SBQQ__SubscriptionTerm__c = ifelse((is.na(prod_subtype__c) == F & (prod_subtype__c %in% c("DC", "NULL", "null") | prod_subtype__c == "")) | is.na(prod_subtype__c), 12, SBQQ__SubscriptionTerm__c),
                             OpportunityACV = ave(ACV, grouping, FUN = sum),
@@ -642,10 +643,15 @@ Main19 <- Main19 %>% mutate(DiscountBucket = ifelse(OpportunityDiscount < 1, "1.
 #Check for failed discount calculations
 #Test13 <- Main19 %>% filter(ListACVDiscount == 0 & OpportunityListACV > 0)
 
-
 write.csv(Main19,"Partner Discount Info.csv",row.names = FALSE)
 
-Main20 <- Main19 %>% filter(is.na(Sub_Territory__c) == F & StageName != "Closed Lost Duplicate") %>%
+#Fix deal reg field
+Main19 <- Main19 %>% mutate(Deal_Reg_Type__c = ifelse(is.na(Deal_Reg_Type__c) | Deal_Reg_Type__c == "", "None", as.character(Deal_Reg_Type__c)))
+
+#Get rid of big huge deals
+Main19 <- Main19 %>% mutate(Testing = ifelse(is.na(Account_Name) == T | (grepl("big huge", tolower(Account_Name)) == F & grepl("barracuda", tolower(Account_Name))) == F, 0, 1))
+
+Main20 <- Main19 %>% filter(is.na(Sub_Territory__c) == F & StageName != "Closed Lost Duplicate" & Testing == 0) %>%
   filter(is.na(Extended_Price__c) | Extended_Price__c != 0 | is.na(ACV) | ACV != 0) %>%
   select(-LeadSource, -HotListTitle, -HotListLeadSource, -HotListType, -CSSourced, -RRSourced, -SalesSourced, -LDRSourced, -LeadSourceEdited) %>%
   rename(LeadSource = NewLeadSource) %>%
@@ -655,11 +661,12 @@ Main20 <- Main19 %>% filter(is.na(Sub_Territory__c) == F & StageName != "Closed 
          -grouping, -OpportunityACV, -OpportunityTCV, -OpportunityTerm, -ExtendedACV, -OpportunityListACV, -OpportunityExtended, -OpportunityPartnerTotal, -OpportunityDiscount,
          -MaxDiscount, -MidDiscount, -DiscountEvaluation, -SBQQ__NetTotal__c, -SBQQ__PartnerDiscount__c, -Partner_Total, -TermDiscount, -ListACVDiscount, -DiscountBucket)
 
-setwd("C:/Users/nikumar/OneDrive - Barracuda Networks, Inc/Desktop/R Projects/Pipeline")
+#setwd("C:/Users/nikumar/OneDrive - Barracuda Networks, Inc/Desktop/R Projects/Pipeline")
+setwd("C:/Users/jgrossman/Downloads")
 write.csv(Main20, "Pipeline.csv", row.names = FALSE)
 
 #Pipeline discount
-PipeDiscount11 <- Main19 %>% filter(is.na(Sub_Territory__c) == F & StageName != "Closed Lost Duplicate") %>%
+PipeDiscount11 <- Main19 %>% filter(is.na(Sub_Territory__c) == F & StageName != "Closed Lost Duplicate" & Testing == 0) %>%
   select(Account_Name, Opportunity_Id, OpportunityListACV, OpportunityACV, OpportunityTCV, OpportunityListACV, OpportunityTerm,
          OpportunityDiscount, MaxDiscount, MidDiscount,ListACVDiscount, DiscountEvaluation,
          Quote_Id, Required_or_Optional, DiscountBucket,SBQQ__PartnerDiscount__c)
@@ -686,11 +693,13 @@ PipeDiscount12 <- PipeDiscount12 %>% arrange(Opportunity_Id,desc(SBQQ__PartnerDi
 PipeDiscount13 <- PipeDiscount12 %>% filter(choice == 1) %>% select(-value, -check, -Quote_Id, -grouping, -Required_or_Optional, -Account_Name,-choice) 
 
 #We need to change working drive to save directly to Git
-setwd("C:/Users/nikumar/OneDrive - Barracuda Networks, Inc/Desktop/R Projects/Pipeline")
+#setwd("C:/Users/nikumar/OneDrive - Barracuda Networks, Inc/Desktop/R Projects/Pipeline")
+setwd("C:/Users/jgrossman/Downloads")
 write.csv(PipeDiscount13, "Pipeline Discounting.csv", row.names = FALSE)
 
 #Pipeline upload
-setwd("C:/Users/nikumar/OneDrive - Barracuda Networks, Inc/Desktop/R Projects/Pipeline")
+#setwd("C:/Users/nikumar/OneDrive - Barracuda Networks, Inc/Desktop/R Projects/Pipeline")
+setwd("C:/Users/jgrossman/Downloads")
 P11 <- read.csv("Pipeline.csv")
 P11 <- P11 %>% mutate(CreatedDate = as.Date(CreatedDate),
                       CloseDate = as.Date(CloseDate)) %>%
@@ -702,6 +711,7 @@ Upload = P11
 Size = 5000
 Rows = nrow(Upload)
 Rounds = seq(1,ceiling(Rows / Size) - 1)
+NumberOfRounds = ceiling(Rows / Size) - 1
 rm(i)
 
 CudaAzure1 = 1
@@ -712,7 +722,9 @@ while (typeof(CudaAzure1) != "S4"){
 a11 <- Upload[1:Size,]
 dbWriteTable(CudaAzure1, "SalesOperationsPipeline", a11, overwrite = TRUE)
 
-for (i in Rounds){
+i = 1
+
+while (i <= NumberOfRounds){
   CudaAzure1 = 1
   #Reload Data
   while (typeof(CudaAzure1) != "S4"){
@@ -724,53 +736,26 @@ for (i in Rounds){
   Start = i * Size + 1
   End = (i+1) * Size
   a11 <- Upload[Start:End,] %>% filter(is.na(Opportunity_Id) == F)
-  dbWriteTable(CudaAzure1, "SalesOperationsPipeline", a11, overwrite = FALSE, append = TRUE)
+  rownames(a11) <- NULL
+  
+  a12 <- tryCatch(dbWriteTable(CudaAzure1, "SalesOperationsPipeline", a11, overwrite = FALSE, append = TRUE), error = function(e){FALSE})
+  
+  j = if(a12 == TRUE){1} else {0} 
+  i = i + j
+  
   print(i)
 }
 
+#Replace production table with uploaded table
+#Upload11 <- tryCatch(dbFetch(dbSendQuery(CudaAzure1, "Select * from SalesOperations")), error = function(e){FALSE})
+#Production11 <- dbFetch(dbSendQuery(CudaAzure1, "Select * from SalesOperationsPipeline"))
 
-
-'
-P20 <- P11 %>% filter(CreatedDate < as.Date("2020-03-01"))
-P21 <- P11 %>% filter(CreatedDate >= as.Date("2020-03-01") & CreatedDate < as.Date("2020-06-01"))
-P22 <- P11 %>% filter(CreatedDate >= as.Date("2020-06-01") & CreatedDate < as.Date("2020-09-01"))
-P23 <- P11 %>% filter(CreatedDate >= as.Date("2020-09-01") & CreatedDate < as.Date("2020-12-01"))
-P24 <- P11 %>% filter(CreatedDate >= as.Date("2020-12-01") & CreatedDate < as.Date("2021-03-01"))
-P25 <- P11 %>% filter(CreatedDate >= as.Date("2021-03-01") & CreatedDate < as.Date("2021-06-01"))
-P26 <- P11 %>% filter(CreatedDate >= as.Date("2021-06-01") & CreatedDate < as.Date("2021-09-01"))
-P27 <- P11 %>% filter(CreatedDate >= as.Date("2021-09-01"))
-
-#Reload Data
-{
-  #stop()
-  CudaAzure <- dbConnect(odbc(), "CudaAzure1", uid = "jori", pwd = "xm2!p49kl")
-  dbWriteTable(CudaAzure, "SalesOperationsPipeline", P20, overwrite = TRUE)
-}
-
-#Append Data
-{
-  #stop()
-  CudaAzure <- dbConnect(odbc(), "CudaAzure1", uid = "jori", pwd = "xm2!p49kl")
-  dbWriteTable(CudaAzure, "SalesOperationsPipeline", P21, overwrite = FALSE, append = TRUE)
-  dbWriteTable(CudaAzure, "SalesOperationsPipeline", P22, overwrite = FALSE, append = TRUE)
-  
-  CudaAzure <- dbConnect(odbc(), "CudaAzure1", uid = "jori", pwd = "xm2!p49kl")
-  dbWriteTable(CudaAzure, "SalesOperationsPipeline", P23, overwrite = FALSE, append = TRUE)
-  dbWriteTable(CudaAzure, "SalesOperationsPipeline", P24, overwrite = FALSE, append = TRUE)
-  
-  CudaAzure <- dbConnect(odbc(), "CudaAzure1", uid = "jori", pwd = "xm2!p49kl")
-  dbWriteTable(CudaAzure, "SalesOperationsPipeline", P25, overwrite = FALSE, append = TRUE)
-  dbWriteTable(CudaAzure, "SalesOperationsPipeline", P26, overwrite = FALSE, append = TRUE)
-  dbWriteTable(CudaAzure, "SalesOperationsPipeline", P27, overwrite = FALSE, append = TRUE)
-}
-'
-
-#rm(list = c("P11", "P20", "P21", "P22", "P23", "P24", "P25", "P26", "P27"))
 
 #Pipeline Discount
 {
   #stop()
-  setwd("C:/Users/nikumar/OneDrive - Barracuda Networks, Inc/Desktop/R Projects/Pipeline")
+  #setwd("C:/Users/nikumar/OneDrive - Barracuda Networks, Inc/Desktop/R Projects/Pipeline")
+  setwd("C:/Users/jgrossman/Downloads")
   PD11 <- read.csv("Pipeline Discounting.csv")
   
   PD12 <- PD11 %>% filter(MaxDiscount != -Inf & OpportunityListACV != Inf)
@@ -781,12 +766,37 @@ P27 <- P11 %>% filter(CreatedDate >= as.Date("2021-09-01"))
                           MaxDiscount = round(MaxDiscount, 2),
                           MidDiscount = round(MidDiscount, 2))
   
+  #Whole upload
+  Upload = PD12
+  Size = 5000
+  Rows = nrow(Upload)
+  Rounds = seq(1,ceiling(Rows / Size) - 1)
+  rm(i)
+  
+  CudaAzure1 = 1
   #Reload Data
-  {
-    #stop()
-    CudaAzure <- dbConnect(odbc(), "CudaAzure1", uid = "jori", pwd = "xm2!p49kl")
-    dbWriteTable(CudaAzure, "SalesOperationsPipelineDiscount", PD12, overwrite = TRUE)
+  while (typeof(CudaAzure1) != "S4"){
+    CudaAzure1 <- tryCatch(dbConnect(odbc(), "CudaAzure1", uid = "jori", pwd = "xm2!p49kl"), error = function(e){as.data.frame(c("Error"))})
+  }
+  a11 <- Upload[1:Size,]
+  dbWriteTable(CudaAzure1, "SalesOperationsPipelineDiscount", a11, overwrite = TRUE)
+  
+  for (i in Rounds){
+    CudaAzure1 = 1
+    #Reload Data
+    while (typeof(CudaAzure1) != "S4"){
+      CudaAzure1 <- tryCatch(dbConnect(odbc(), "CudaAzure1", uid = "jori", pwd = "xm2!p49kl"), error = function(e){as.data.frame(c("Error"))})
+    }
+    rm(Start)
+    rm(End)
+    rm(a11)
+    Start = i * Size + 1
+    End = (i+1) * Size
+    a11 <- Upload[Start:End,] %>% filter(is.na(Opportunity_Id) == F)
+    rownames(a11) <- NULL
+    dbWriteTable(CudaAzure1, "SalesOperationsPipelineDiscount", a11, overwrite = FALSE, append = TRUE)
+    
+    print(i)
   }
   
 }
-
